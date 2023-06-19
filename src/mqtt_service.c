@@ -117,7 +117,7 @@ int32_t mqtt_service_publish(const uint8_t *p_topic, uint32_t topic_len, uint8_t
 	ret = mqtt_publish(&client_ctx, &publish_params);
 
 	if (ret) {
-		LOG_ERR("Failed to publish to %.*s, err: %d", topic_len, p_topic, ret);
+		// LOG_ERR("Failed to publish to %.*s, err: %d", topic_len, p_topic, ret);
 	} else {
 		ret = publish_params.message_id;
 	}
@@ -142,7 +142,7 @@ int32_t mqtt_service_subscribe(const uint8_t *p_topic, uint32_t topic_len, uint8
 
 	err = mqtt_subscribe(&client_ctx, &subs_list);
 	if (err) {
-		LOG_ERR("Failed subscribing to topic %s", p_topic);
+		// LOG_ERR("Failed subscribing to topic %s", p_topic);
 	}
 
 	return err;
@@ -164,7 +164,7 @@ int32_t mqtt_service_unsubscribe(const uint8_t *p_topic, uint32_t topic_len)
 
 	err = mqtt_unsubscribe(&client_ctx, &subs_list);
 	if (err) {
-		LOG_ERR("Failed unsubscribing from topic %s", p_topic);
+		// LOG_ERR("Failed unsubscribing from topic %s", p_topic);
 	}
 
 	return err;
@@ -183,7 +183,7 @@ static int broker_init(void)
 
 	err = zsock_getaddrinfo(CONFIG_MQTT_SERVICE_SERVER_DOMAIN_NAME, NULL, &hints, &result);
 	if (err) {
-		LOG_ERR("getaddrinfo, error %d", err);
+		// LOG_ERR("getaddrinfo, error %d", err);
 		return -ECHILD;
 	}
 
@@ -251,20 +251,20 @@ static int tls_init(struct mqtt_client *client)
 	err = tls_credential_add(APP_CA_CERT_TAG, TLS_CREDENTIAL_CA_CERTIFICATE, ca_certificate,
 				 sizeof(ca_certificate));
 	if (err != 0) {
-		LOG_ERR("Failed to register ca certificate: %d", err);
+		// LOG_ERR("Failed to register ca certificate: %d", err);
 		return err;
 	}
 
 	err = tls_credential_add(APP_CA_CERT_TAG, TLS_CREDENTIAL_SERVER_CERTIFICATE,
 				 server_certificate, sizeof(server_certificate));
 	if (err < 0) {
-		LOG_ERR("Failed to register server certificate: %d", err);
+		// LOG_ERR("Failed to register server certificate: %d", err);
 	}
 
 	err = tls_credential_add(APP_CA_CERT_TAG, TLS_CREDENTIAL_PRIVATE_KEY, private_key,
 				 sizeof(private_key));
 	if (err < 0) {
-		LOG_ERR("Failed to register private key: %d", err);
+		// LOG_ERR("Failed to register private key: %d", err);
 	}
 
 	client->transport.type = MQTT_TRANSPORT_SECURE;
@@ -303,14 +303,14 @@ static int32_t mqtt_service_client_init(struct mqtt_client *client)
 	// Get device serial number in binary (byte) representation
 	hwinfo_size_read = hwinfo_get_device_id(client_id, sizeof(client_id));
 
-	LOG_HEXDUMP_INF(client_id, hwinfo_size_read, "Device ID");
+	// LOG_HEXDUMP_INF(client_id, hwinfo_size_read, "Device ID");
 
 	// Convert device serial number from binary (byte) to hex string
 	// representation
 	(void)bin2hex((const uint8_t *)client_id, sizeof(client_id), client_id_string,
 		      sizeof(client_id_string));
 
-	LOG_INF("Device ID String: %s", client_id_string);
+	// LOG_INF("Device ID String: %s", client_id_string);
 
 	client->client_id.utf8 = (const uint8_t *)client_id_string;
 	client->client_id.size = strlen(client_id_string);
@@ -343,7 +343,7 @@ static void mqtt_service_evt_handler(struct mqtt_client *const client, const str
 		event.type = MQTT_SERVICE_EVT_CONNECTED;
 
 		if (evt->result != 0) {
-			LOG_ERR("MQTT connect failed %d", evt->result);
+			// LOG_ERR("MQTT connect failed %d", evt->result);
 			break;
 		}
 
@@ -375,7 +375,7 @@ static void mqtt_service_evt_handler(struct mqtt_client *const client, const str
 		event.type = MQTT_SERVICE_EVT_BROKER_ACK;
 
 		if (evt->result != 0) {
-			LOG_ERR("MQTT PUBACK error %d", evt->result);
+			// LOG_ERR("MQTT PUBACK error %d", evt->result);
 			break;
 		}
 
@@ -412,7 +412,7 @@ static void mqtt_service_evt_handler(struct mqtt_client *const client, const str
 				&client_ctx, payload,
 				len > sizeof(payload) ? sizeof(payload) : len);
 			if (bytes_read < 0 && bytes_read != -EAGAIN) {
-				LOG_ERR("Failed to read payload");
+				// LOG_ERR("Failed to read payload");
 				break;
 			}
 
@@ -473,7 +473,7 @@ static int32_t mqtt_service_client_connect(void)
 
 	err = mqtt_connect(&client_ctx);
 	if (err) {
-		LOG_ERR("mqtt_connect, error: %d", err);
+		// LOG_ERR("mqtt_connect, error: %d", err);
 		return err;
 	}
 
@@ -509,7 +509,7 @@ start:
 		if (err == 0) {
 			err = mqtt_ping(&client_ctx);
 			if (err) {
-				LOG_ERR("Cloud MQTT keepalive ping failed: %d", err);
+				// LOG_ERR("Cloud MQTT keepalive ping failed: %d", err);
 				break;
 			}
 			continue;
@@ -518,7 +518,7 @@ start:
 		if ((fds[0].revents & ZSOCK_POLLIN) == ZSOCK_POLLIN) {
 			err = mqtt_input(&client_ctx);
 			if (err) {
-				LOG_ERR("Cloud MQTT input error: %d", err);
+				// LOG_ERR("Cloud MQTT input error: %d", err);
 				if (err == -ENOTCONN) {
 					break;
 				}
@@ -533,7 +533,7 @@ start:
 		}
 
 		if (err < 0) {
-			LOG_ERR("poll() returned an error: %d", err);
+			// LOG_ERR("poll() returned an error: %d", err);
 			event.data.disc_reason = MQTT_SERVICE_DISCONNECT_OTHER;
 			break;
 		}
@@ -569,7 +569,7 @@ start:
 		user_cb(&event);
 		err = mqtt_disconnect(&client_ctx);
 		if (err) {
-			LOG_ERR("mqtt_disconnect fail, err: %d", err);
+			// LOG_ERR("mqtt_disconnect fail, err: %d", err);
 		}
 	}
 

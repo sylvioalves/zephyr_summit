@@ -37,7 +37,7 @@ config MQTT_SERVICE_CONNECTION_TIMEOUT_MS
 
 config MQTT_SERVICE_THREAD_STACK_SIZE
 	int "MQTT service thread stack size"
-	default 4096
+	default 3072
 	help
 		Stack size used by internal mqtt polling thread.
 
@@ -56,6 +56,20 @@ config MQTT_SERVICE_TX_BUFFER_SIZE
 config MQTT_SERVICE_PAYLOAD_BUFFER_SIZE
 	int "MQTT payload buffer size"
 	default 1024
+	help
+		MQTT payload buffer is used for receiving large payload data. This buffer
+		is usually used to store data from MQTT_EVT_PUBLISH events.
+
+config WIFI_SSID
+	string "Wi-Fi SSID"
+	default "lfevents"
+	help
+		MQTT payload buffer is used for receiving large payload data. This buffer
+		is usually used to store data from MQTT_EVT_PUBLISH events.
+
+config WIFI_PSK
+	string "Wi-Fi PSK"
+	default "linux1991"
 	help
 		MQTT payload buffer is used for receiving large payload data. This buffer
 		is usually used to store data from MQTT_EVT_PUBLISH events.

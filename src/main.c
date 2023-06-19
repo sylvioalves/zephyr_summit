@@ -1,105 +1,132 @@
-/*
- * Copyright (c) 2018 Jan Van Winkel <jan.van_winkel@dxplore.eu>
- *
- * SPDX-License-Identifier: Apache-2.0
- */
-
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
-#include <zephyr/drivers/display.h>
-#include <zephyr/drivers/gpio.h>
-#include <lvgl.h>
-#include <stdio.h>
-#include <string.h>
+#include <zephyr/data/json.h>
 #include <zephyr/kernel.h>
+#include <zephyr/ipc/rpmsg_service.h>
 
-#define LOG_LEVEL CONFIG_LOG_DEFAULT_LEVEL
+#include "project.h"
+
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(app);
+LOG_MODULE_REGISTER(cpu0, CONFIG_LOG_DEFAULT_LEVEL);
 
-static uint32_t count;
+/* sensor data */
+static struct sensor evt_status;
 
-#ifdef CONFIG_GPIO
-static struct gpio_dt_spec button_gpio = GPIO_DT_SPEC_GET_OR(DT_ALIAS(sw0), gpios, {0});
-static struct gpio_callback button_callback;
+/* RPMsg */
+static int ep_id;
+struct rpmsg_endpoint my_ept;
+struct rpmsg_endpoint *ep = &my_ept;
 
-static void button_isr_callback(const struct device *port, struct gpio_callback *cb, uint32_t pins)
+static uint8_t m_state = WIFI_DISCONNECTED;
+
+static int rpmsg_send_start(void)
 {
-	ARG_UNUSED(port);
-	ARG_UNUSED(cb);
-	ARG_UNUSED(pins);
-
-	count = 0;
+	uint8_t msg = 0;
+	return rpmsg_service_send(ep_id, &msg, 1);
 }
-#endif
+
+void mqtt_response(const char *topic, uint32_t topic_len, const char *msg, uint32_t msg_len)
+{
+	LOG_INF("topic: %s", topic);
+	LOG_INF("msg: %s", msg);
+}
 
 int main(void)
 {
-	char count_str[11] = {0};
-	const struct device *display_dev;
-	lv_obj_t *hello_world_label;
-	lv_obj_t *count_label;
+	char msg[50];
 
-	display_dev = DEVICE_DT_GET(DT_CHOSEN(zephyr_display));
-	if (!device_is_ready(display_dev)) {
-		LOG_ERR("Device not ready, aborting test");
-		return 0;
+	/* wait endpoint to sync */
+	while (!rpmsg_service_endpoint_is_bound(ep_id)) {
+		k_sleep(K_MSEC(100));
 	}
 
-	LV_IMG_DECLARE(zephyr_summit);
-	LV_IMG_DECLARE(esp_logo);
-	LV_IMG_DECLARE(esp_text);
-	lv_obj_t *img_zephyr;
-	lv_obj_t *img_esp;
-	lv_obj_t *img_esp_text;
+	/* send initial start command to CPU1 */
+	rpmsg_send_start();
 
-	img_esp = lv_img_create(lv_scr_act());
-	lv_img_set_src(img_esp, &esp_logo);
-	lv_obj_align(img_esp, LV_ALIGN_CENTER, 0, -30);
+	/* update display values */
+	lv_motor_gauge_value(evt_status.motor_rpm);
+	lv_temp_set_value(evt_status.temp);
 
-	img_esp_text = lv_img_create(lv_scr_act());
-	lv_img_set_src(img_esp_text, &esp_text);
-	lv_obj_align(img_esp_text, LV_ALIGN_BOTTOM_MID, 0, -40);
+	/* init wifi and mqtt */
+	wifi_init();
+	mqtt_init(mqtt_response);
 
-	display_blanking_off(display_dev);
-	lv_task_handler();
+	for (;;) {
 
-	k_msleep(3000);
+		switch (m_state) {
+		case WIFI_DISCONNECTED:
+			wifi_connect();
+			m_state = WIFI_CONNECTING;
+			break;
 
-	img_zephyr = lv_img_create(lv_scr_act());
-	lv_img_set_src(img_zephyr, &zephyr_summit);
-	lv_obj_align(img_zephyr, LV_ALIGN_TOP_LEFT, 0, 0);
+		case WIFI_CONNECTING:
+			if (wifi_connected()) {
+				m_state = WIFI_CONNECTED;
+			} else {
+				m_state = WIFI_DISCONNECTED;
+			}
+			break;
 
-	// for (;;) {
-		lv_task_handler();
-		k_sleep(K_MSEC(10));
-	// }
+		case WIFI_CONNECTED:
+			if (mqtt_connect_broker() == 0) {
+				k_msleep(1000);
+				mqtt_subscribe_to(topic_sub, strlen(topic_sub), 0);
+				m_state = MQTT_CONNECTED;
+			} else {
+				m_state = WIFI_CONNECTING;
+			}
+			break;
 
-#ifdef CONFIG_GPIO
-	if (device_is_ready(button_gpio.port)) {
-		int err;
+		case MQTT_CONNECTED:
+			if (!wifi_connected()) {
+				mqtt_disconnect_broker();
+				m_state = WIFI_DISCONNECTED;
+			}
 
-		err = gpio_pin_configure_dt(&button_gpio, GPIO_INPUT);
-		if (err) {
-			LOG_ERR("failed to configure button gpio: %d", err);
-			return 0;
+			if (mqtt_connected()) {
+				sprintf(msg, "{\"temp\":%0.1f, \"rpm\":%d}", evt_status.temp,
+					evt_status.motor_rpm);
+				mqtt_publish_to(topic_pub, strlen(topic_pub), msg, strlen(msg), 0);
+			} else {
+				mqtt_disconnect_broker();
+				m_state = WIFI_CONNECTING;
+			}
+			break;
+
+		default:
+			break;
 		}
 
-		gpio_init_callback(&button_callback, button_isr_callback, BIT(button_gpio.pin));
-
-		err = gpio_add_callback(button_gpio.port, &button_callback);
-		if (err) {
-			LOG_ERR("failed to add button callback: %d", err);
-			return 0;
-		}
-
-		err = gpio_pin_interrupt_configure_dt(&button_gpio, GPIO_INT_EDGE_TO_ACTIVE);
-		if (err) {
-			LOG_ERR("failed to enable button callback: %d", err);
-			return 0;
-		}
+		k_msleep(1000);
 	}
-#endif
 
-	mqtt_init();
+	return 0;
 }
+
+int endpoint_cb(struct rpmsg_endpoint *ept, void *data, size_t len, uint32_t src, void *priv)
+{
+	memcpy(&evt_status, data, sizeof(evt_status));
+	lv_motor_gauge_value(evt_status.motor_rpm);
+	lv_temp_set_value(evt_status.temp);
+
+	return RPMSG_SUCCESS;
+}
+
+/* Make sure we register endpoint before RPMsg Service is initialized. */
+int register_endpoint(void)
+{
+	int status;
+
+	status = rpmsg_service_register_endpoint("demo", endpoint_cb);
+
+	if (status < 0) {
+		printk("rpmsg_create_ept failed %d\n", status);
+		return status;
+	}
+
+	ep_id = status;
+
+	return 0;
+}
+
+SYS_INIT(register_endpoint, POST_KERNEL, CONFIG_RPMSG_SERVICE_EP_REG_PRIORITY);
